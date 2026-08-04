@@ -217,10 +217,18 @@ class TextAssociativeMemory(SellyAssociativeMemory):
     ) -> List[Match]:
         """Search for ``probe_data`` within a pre-encoded target text.
 
-        ``threshold`` is a float score floor or ``"auto"`` (gate on
-        significance z >= ``AUTO_Z`` under the binomial null).
+        ``threshold`` is a float score floor or ``"auto"`` (exact
+        binomial p-value gate at ``AUTO_P`` — reports significant
+        partial matches too, not just near-exact ones).
         """
         thr = self._resolve_threshold(threshold)
+        if not isinstance(target_encoded, np.ndarray):
+            raise TypeError(
+                f"search() expects a pre-encoded target (np.ndarray from "
+                f"encode_target), got {type(target_encoded).__name__}. "
+                f"For raw probe/target data use search_direct() or "
+                f"find_matches() instead."
+            )
         probe = self.encode_probe(probe_data)
         scores = normalized_xcorr_multichannel(probe, target_encoded)
         return self._collect_matches(scores, thr, len(probe_data))
