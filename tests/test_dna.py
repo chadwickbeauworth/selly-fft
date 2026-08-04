@@ -25,18 +25,18 @@ class TestDNAAssociativeMemory:
     def test_dna_nonmatch_scores_zero(self):
         """AAAA vs GGGG: A=0°, G=270° → orthogonal → score 0."""
         from selly_fft import holographic_match
-        s = holographic_match("AAAAAAAA", "GGGG", alphabet=DNA_ALPHABET)
+        s = holographic_match("GGGG", "AAAAAAAA", alphabet=DNA_ALPHABET)
         assert s < 0.01
 
     def test_dna_antipodal_scores_zero(self):
         """AAAA vs TTTT: A=0°, T=180° → antipodal → cos=-1 → clipped 0."""
         from selly_fft import holographic_match
-        s = holographic_match("AAAAAAAA", "TTTT", alphabet=DNA_ALPHABET)
+        s = holographic_match("TTTT", "AAAAAAAA", alphabet=DNA_ALPHABET)
         assert s < 0.01
 
     def test_dna_self_match(self):
         from selly_fft import holographic_match
-        assert holographic_match("ATCGATCG", "ATCG", alphabet=DNA_ALPHABET) > 0.99
+        assert holographic_match("ATCG", "ATCGATCG", alphabet=DNA_ALPHABET) > 0.99
 
     def test_partial_dna_match(self):
         """3/4 DNA symbols matching → score ≈ 0.75."""

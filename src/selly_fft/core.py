@@ -36,6 +36,7 @@ classical FFT signal-processing algorithm.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
@@ -96,7 +97,9 @@ def encode_unit_circle(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
 encode_symbols = encode_unit_circle
 
 
-def encode_orthogonal(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
+def encode_orthogonal(
+    symbols: Sequence, alphabet: Sequence, dtype: "np.typing.DTypeLike" = np.float64
+) -> np.ndarray:
     """Encode symbols as mutually orthogonal (one-hot) vectors.
 
     Each symbol maps to a unit basis vector ``e_k`` of dimension
@@ -123,6 +126,9 @@ def encode_orthogonal(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
         Ordered symbols to encode.
     alphabet : sequence
         Ordered set defining the symbol→index mapping.
+    dtype : numpy dtype, default float64
+        Storage dtype for the one-hot matrix.  ``np.float32`` halves
+        memory at a negligible accuracy cost for match-fraction scoring.
 
     Returns
     -------
@@ -137,7 +143,7 @@ def encode_orthogonal(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
     """
     idx = _alphabet_index(alphabet)
     L = len(idx)
-    out = np.zeros((len(symbols), L), dtype=np.float64)
+    out = np.zeros((len(symbols), L), dtype=dtype)
     for i, sym in enumerate(symbols):
         if sym not in idx:
             raise ValueError(f"symbol {sym!r} not in alphabet")
@@ -148,6 +154,39 @@ def encode_orthogonal(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Correlation primitives
 # ---------------------------------------------------------------------------
+
+def _binom_sf(k: int, n: int, p: float) -> float:
+    """Exact upper tail P(X >= k) for X ~ Binomial(n, p).
+
+    Log-space evaluation with upward recurrence from ``k``; no scipy
+    dependency.  Conservative short-circuit: if ``k`` is at or below the
+    null mean the tail is large, so 1.0 is returned (the gate will reject
+    it as non-significant anyway).
+    """
+    if k <= 0:
+        return 1.0
+    if k > n or p <= 0.0:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    if k <= n * p:
+        return 1.0  # below the null mean: certainly not significant
+    logp = math.log(p)
+    logq = math.log1p(-p)
+    log_term = (
+        math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+        + k * logp + (n - k) * logq
+    )
+    term = math.exp(log_term)
+    total = term
+    ratio_pq = p / (1.0 - p)
+    for j in range(k + 1, n + 1):
+        term *= (n - j + 1) / j * ratio_pq
+        total += term
+        if term <= total * 1e-15:
+            break
+    return min(1.0, total)
+
 
 def _pad_to(a: np.ndarray, length: int) -> np.ndarray:
     """Right-pad a 1-D array with zeros to ``length``."""
@@ -186,9 +225,9 @@ def linear_correlation(query: np.ndarray, reference: np.ndarray) -> np.ndarray:
         nfft <<= 1
     A = _pad_to(a, nfft)
     B = _pad_to(b, nfft)
-    # Cross-correlation: corr[k] = sum_i a[i] * conj(b[k+i])
-    # FFT: ifft(conj(FFT(A)) * FFT(B)) gives this (real part) after
-    # zero-padding to >= na+nb-1.
+    # Cross-correlation: corr[k] = sum_i conj(a[i]) * b[k+i]
+    # FFT identity: ifft(conj(FFT(A)) * FFT(B)) = that sum, computed
+    # circularly; zero-padding to >= na+nb-1 makes it linear.
     corr = np.fft.ifft(np.conj(np.fft.fft(A)) * np.fft.fft(B))
     valid = corr[: nb - na + 1]
     return valid
@@ -282,17 +321,25 @@ def normalized_xcorr_multichannel(
         Scores in ``[0, 1]`` over the valid region — the fraction of
         exactly-matching symbol positions at each shift.
     """
-    a = np.asarray(query, dtype=np.float64)
-    b = np.asarray(reference, dtype=np.float64)
+    a = np.asarray(query)
+    b = np.asarray(reference)
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("multichannel correlation requires 2-D (n, channels) arrays")
     if a.shape[1] != b.shape[1]:
         raise ValueError(
             f"channel mismatch: query has {a.shape[1]}, reference has {b.shape[1]}"
         )
+    if a.dtype != b.dtype:
+        a = a.astype(np.promote_types(a.dtype, b.dtype), copy=False)
+        b = b.astype(np.promote_types(a.dtype, b.dtype), copy=False)
+    # Respect the input floating dtype (float32 halves memory); anything
+    # non-floating is promoted to float64.
+    work = a.dtype if np.issubdtype(a.dtype, np.floating) else np.float64
+    a = a.astype(work, copy=False)
+    b = b.astype(work, copy=False)
     na, nb = a.shape[0], b.shape[0]
     if na == 0 or nb == 0 or na > nb:
-        return np.zeros(0, dtype=np.float64)
+        return np.zeros(0, dtype=work)
 
     n_valid = nb - na + 1
     nfft = 1
@@ -301,21 +348,99 @@ def normalized_xcorr_multichannel(
 
     # Correlate channel-by-channel; skip channels absent from the query
     # (their contribution to the match count is identically zero).
-    total = np.zeros(nfft, dtype=np.float64)
+    total = np.zeros(nfft, dtype=work)
     active = np.flatnonzero(a.any(axis=0))
     for ch in active:
-        A = np.zeros(nfft, dtype=np.float64)
-        B = np.zeros(nfft, dtype=np.float64)
+        A = np.zeros(nfft, dtype=work)
+        B = np.zeros(nfft, dtype=work)
         A[:na] = a[:, ch]
         B[:nb] = b[:, ch]
         prod = np.conj(np.fft.rfft(A)) * np.fft.rfft(B)
         total += np.fft.irfft(prod, n=nfft)
 
-    matches = total[:n_valid]
+    matches = total[:n_valid].astype(np.float64, copy=False)
     # Each matching position contributes exactly 1.0; normalize by query
     # length to get the match fraction.
     scores = matches / float(na)
     return np.clip(scores, 0.0, 1.0)
+
+
+def normalized_xcorr_multichannel_batch(
+    probes: Sequence[np.ndarray], reference: np.ndarray
+) -> List[np.ndarray]:
+    r"""Batch multichannel correlation sharing the reference transforms.
+
+    Correlates many probes against one reference, computing the
+    reference channel FFTs **once** (at a single FFT size covering the
+    longest probe) instead of once per probe per channel.  This is the
+    economic shape for repeated probing of a fixed target: encode the
+    target once, then scan many probes across it.
+
+    Parameters
+    ----------
+    probes : sequence of np.ndarray
+        2-D ``(m_i, L)`` one-hot encodings (outputs of
+        :func:`encode_orthogonal`).  All must share the reference's
+        channel count ``L``.
+    reference : np.ndarray
+        2-D ``(n, L)`` one-hot encoding of the target.
+
+    Returns
+    -------
+    list of np.ndarray
+        One score array per probe, each in ``[0, 1]`` over the valid
+        region — identical to calling
+        :func:`normalized_xcorr_multichannel` per probe.
+    """
+    b = np.asarray(reference)
+    if b.ndim != 2:
+        raise ValueError("batch correlation requires a 2-D (n, channels) reference")
+    if not np.issubdtype(b.dtype, np.floating):
+        b = b.astype(np.float64)
+    nb, L = b.shape
+    work = b.dtype
+
+    probes = [np.asarray(p) for p in probes]
+    for p in probes:
+        if p.ndim != 2 or p.shape[1] != L:
+            raise ValueError("every probe must be 2-D with the reference's channel count")
+    # longest usable probe drives the shared FFT size
+    usable = [p for p in probes if 0 < p.shape[0] <= nb]
+    if nb == 0 or not usable:
+        return [np.zeros(0, dtype=np.float64) for _ in probes]
+
+    max_na = max(p.shape[0] for p in usable)
+    nfft = 1
+    while nfft < max_na + nb - 1:
+        nfft <<= 1
+
+    # Channels active in ANY probe get one shared reference transform.
+    active = np.zeros(L, dtype=bool)
+    for p in usable:
+        active |= p.any(axis=0)
+    rfft_B = {}
+    for ch in np.flatnonzero(active):
+        B = np.zeros(nfft, dtype=work)
+        B[:nb] = b[:, ch]
+        rfft_B[ch] = np.fft.rfft(B)
+
+    out: List[np.ndarray] = []
+    for p in probes:
+        na = p.shape[0]
+        if na == 0 or na > nb:
+            out.append(np.zeros(0, dtype=np.float64))
+            continue
+        if not np.issubdtype(p.dtype, np.floating):
+            p = p.astype(work, copy=False)
+        n_valid = nb - na + 1
+        total = np.zeros(nfft, dtype=work)
+        for ch in np.flatnonzero(p.any(axis=0)):
+            A = np.zeros(nfft, dtype=work)
+            A[:na] = p[:, ch]
+            total += np.fft.irfft(np.conj(np.fft.rfft(A)) * rfft_B[ch], n=nfft)
+        scores = total[:n_valid].astype(np.float64, copy=False) / float(na)
+        out.append(np.clip(scores, 0.0, 1.0))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +492,25 @@ class SellyAssociativeMemory:
     ----------
     alphabet : str or sequence, optional
         Symbols defining the encoding.  Defaults to alphanumeric.
+        Must be non-empty and contain no duplicate symbols.
     threshold : float, default 0.5
         Minimum normalized score to report as a match.
+
+    Raises
+    ------
+    ValueError
+        If ``alphabet`` is empty or contains duplicate symbols.
     """
+
+    # Encoding family used by this class; subclasses that switch to
+    # one-hot (orthogonal) encoding set this to "orthogonal" so that
+    # _significance uses the correct null model.
+    _ENCODING = "unit_circle"
+
+    # p-value ceiling applied when threshold="auto": a position is
+    # reported only if its match count would occur under the null
+    # (independent uniform symbols) with probability <= AUTO_P.
+    AUTO_P = 1e-3
 
     def __init__(
         self,
@@ -377,6 +518,7 @@ class SellyAssociativeMemory:
         threshold: float = 0.5,
     ) -> None:
         self.alphabet = list(alphabet) if alphabet is not None else list(DEFAULT_ALPHABET)
+        _alphabet_index(self.alphabet)  # validates non-empty + unique
         self.threshold = float(threshold)
         self._L = len(self.alphabet)
 
@@ -399,7 +541,7 @@ class SellyAssociativeMemory:
         probe_data: Sequence,
         target_encoded: np.ndarray,
         *,
-        threshold: Optional[float] = None,
+        threshold: Optional[float | str] = None,
     ) -> List[Match]:
         """Search for ``probe_data`` within a pre-encoded target.
 
@@ -409,55 +551,149 @@ class SellyAssociativeMemory:
             The query symbols.
         target_encoded : np.ndarray
             Output of :meth:`encode_target` (complex unit-circle codes).
-        threshold : float, optional
-            Override the instance threshold.
+        threshold : float or "auto", optional
+            Override the instance threshold.  ``"auto"`` gates on
+            statistical significance instead of a fixed score: a
+            position is reported only if its z-score against the
+            encoding's null model reaches ``AUTO_Z``.
 
         Returns
         -------
         list of Match
             Matches sorted by score descending.
         """
-        thr = threshold if threshold is not None else self.threshold
+        thr = self._resolve_threshold(threshold)
         probe = self.encode(probe_data)
-        scores = normalized_xcorr(probe, target_encoded)
-        matches: List[Match] = []
-        for pos, s in enumerate(scores):
-            if s >= thr:
-                matches.append(
-                    Match(
-                        position=int(pos),
-                        score=float(s),
-                        significance=float(self._significance(s, len(probe_data))),
-                    )
-                )
-        matches.sort(key=lambda m: m.score, reverse=True)
-        return matches
+        scores = self._score_array(probe, target_encoded)
+        return self._collect_matches(scores, thr, len(probe_data))
 
     def search_direct(
         self,
         probe_data: Sequence,
         target_data: Sequence,
         *,
-        threshold: Optional[float] = None,
+        threshold: Optional[float | str] = None,
     ) -> List[Match]:
         """One-shot search without pre-encoding the target."""
         target_enc = self.encode_target(target_data)
         return self.search(probe_data, target_enc, threshold=threshold)
 
+    def search_many(
+        self,
+        probes: Sequence[Sequence],
+        target_encoded: np.ndarray,
+        *,
+        threshold: Optional[float | str] = None,
+    ) -> List[List[Match]]:
+        """Search many probes within one pre-encoded target.
+
+        Returns one match list per probe, in probe order.  The base
+        (unit-circle) implementation simply loops; the text subclass
+        shares the target's channel FFTs across all probes, which is
+        the economical shape for repeated probing of a fixed target.
+        """
+        return [self.search(p, target_encoded, threshold=threshold) for p in probes]
+
+    def best_score(self, probe_data: Sequence, target_data: Sequence) -> float:
+        """Best normalized match score in ``[0, 1]``, ignoring thresholds.
+
+        Unlike :meth:`search_direct` this applies no threshold filtering —
+        a partial match below the reporting threshold is still reflected
+        in the return value.  Returns 0.0 for empty input or when the
+        probe is longer than the target.
+        """
+        if len(probe_data) == 0 or len(target_data) == 0:
+            return 0.0
+        target_enc = self.encode_target(target_data)
+        probe_enc = self.encode_probe(probe_data)
+        scores = self._score_array(probe_enc, target_enc)
+        if scores.size == 0:
+            return 0.0
+        return float(np.max(scores))
+
     # -- internals -----------------------------------------------------
-    @staticmethod
-    def _significance(score: float, n: int) -> float:
+    def _resolve_threshold(self, threshold):
+        """Resolve an optional threshold override (float or "auto")."""
+        thr = threshold if threshold is not None else self.threshold
+        if isinstance(thr, str) and thr != "auto":
+            raise ValueError(f"invalid threshold {thr!r}: use a float or 'auto'")
+        return thr
+
+    def _collect_matches(
+        self, scores: np.ndarray, thr, probe_len: int
+    ) -> List[Match]:
+        """Turn a score array into sorted Matches, applying the threshold.
+
+        ``thr`` is a float (score floor) or the string ``"auto"``
+        (exact binomial p-value gate at ``AUTO_P`` — see
+        :meth:`_auto_pass`).
+        """
+        matches: List[Match] = []
+        for pos, s in enumerate(scores):
+            z = float(self._significance(s, probe_len))
+            if thr == "auto":
+                if not self._auto_pass(s, probe_len):
+                    continue
+            elif s < thr:
+                continue
+            matches.append(Match(position=int(pos), score=float(s), significance=z))
+        matches.sort(key=lambda m: m.score, reverse=True)
+        return matches
+
+    def _auto_pass(self, score: float, n: int) -> bool:
+        """Exact significance gate for ``threshold="auto"``.
+
+        Computes the exact binomial tail probability of the observed
+        match count under the null of independent uniform symbols, and
+        reports only if ``p <= AUTO_P``.  Unlike a normal z-approximation
+        this stays calibrated for short probes (where a single chance
+        symbol match in a 6-char probe is *not* significant).
+
+        For the unit-circle path the exact symbol-match count is not
+        recoverable from the summed score, so a conservative lower bound
+        is used (mismatches contribute at most ``cos(2π/L)`` each).
+        """
+        if n <= 0 or self._L <= 1:
+            return False
+        p_sym = 1.0 / self._L
+        if self._ENCODING == "orthogonal":
+            count = int(round(score * n))
+        else:
+            c = math.cos(2.0 * math.pi / self._L)
+            count = int(math.ceil((score - c) * n / (1.0 - c) - 1e-9))
+        if count <= 0:
+            return False
+        return _binom_sf(count, n, p_sym) <= self.AUTO_P
+
+    def _score_array(
+        self, probe_encoded: np.ndarray, target_encoded: np.ndarray
+    ) -> np.ndarray:
+        """Correlation scores over all valid shifts (encoding-specific)."""
+        return normalized_xcorr(probe_encoded, target_encoded)
+
+    def _significance(self, score: float, n: int) -> float:
         """Heuristic z-score against a uniform-random null model.
 
-        For L equally-likely unit-circle symbols the expected normalized
-        correlation magnitude under the null is ``1/sqrt(L)``; the
-        standard error scales as ``1/sqrt(n)``.
+        The null model depends on the encoding family:
+
+        * **unit_circle** — for ``L`` equally-likely phasor symbols the
+          expected normalized correlation magnitude under the null is
+          ``1/sqrt(L)`` with standard error ``1/sqrt(n)``.
+        * **orthogonal** (one-hot) — the score is a match *fraction*, so
+          the null count of matching positions is ``Binomial(n, 1/L)``;
+          the z-score uses that mean (``1/L``) and variance
+          (``p(1-p)/n``).  This is the correct null for the text path.
         """
-        if n <= 0:
+        if n <= 0 or self._L <= 0:
             return 0.0
-        expected = 1.0 / np.sqrt(36.0)
+        if self._ENCODING == "orthogonal":
+            p = 1.0 / self._L
+            var = p * (1.0 - p) / n
+            if var <= 0.0:
+                return 0.0
+            return float((score - p) / np.sqrt(var))
+        expected = 1.0 / np.sqrt(float(self._L))
         se = 1.0 / np.sqrt(n)
         if se == 0:
             return 0.0
-        z = (score - expected) / se
-        return float(z)
+        return float((score - expected) / se)

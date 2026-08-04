@@ -21,9 +21,10 @@ instead of the naive O(n·m).
 Two encodings are available, auto-selected by alphabet size:
 
 * **Unit-circle phasor** (`encode_unit_circle`) — the patent-faithful
-  encoding.  Exact for small alphabets where symbols sit ≥90° apart
-  (e.g. DNA, A/T/C/G at 90°).  For alphabets larger than 8 symbols the
-  angular separation shrinks and adjacent symbols correlate, so the
+  encoding.  Exact for alphabets of 4 or fewer symbols, where symbols
+  sit ≥90° apart (e.g. DNA, A/T/C/G at 90°).  For larger alphabets the
+  angular separation shrinks below 90° and adjacent symbols correlate
+  (at 8 symbols a total non-match scores 0.707!), so the
   library **switches automatically** to the sharp path below.
 * **One-hot (orthogonal)** (`encode_orthogonal`) — used for large
   alphabets (text).  Distinct symbols are exactly orthogonal, so a total
@@ -67,8 +68,8 @@ pip install -e ".[dev]"
 ```python
 from selly_fft import holographic_match, DNAAssociativeMemory
 
-# Functional API — one-shot match
-score = holographic_match("ACGTACGT", "ACGT")
+# Functional API — one-shot match (probe first, reference second)
+score = holographic_match("ACGT", "ACGTACGT")
 print(f"match score: {score}")  # → 1.0 (exact match)
 
 # DNA subclass — find all occurrences
@@ -107,8 +108,8 @@ mem.find_matches("café", "UN CAFÉ NAÏVE")  # → [Match(position=3, score=1.0
 ```
 
 `holographic_match` auto-selects the sharp path for alphabets larger than
-8 symbols (e.g. `holographic_match("Hello, World!", "World") → 1.0`, and
-a total non-match like `"AAAAAAAAAA"` vs `"BBBBB"` → `0.0`).
+4 symbols (e.g. `holographic_match("World", "Hello, World!") → 1.0`, and
+a total non-match like `"BBBBB"` vs `"AAAAAAAAAA"` → `0.0`).
 
 ## DNA/RNA Sequence Matching
 
@@ -131,23 +132,59 @@ With this encoding:
 
 ## API Reference
 
-### `holographic_match(reference, query, *, alphabet, threshold) -> float`
-One-shot best match score in [0, 1].
+### `holographic_match(probe, reference, *, alphabet, threshold) -> float`
+One-shot best match score in [0, 1], unthresholded. **Changed in 0.2.0:**
+argument order is now probe-first, consistent with `text_match` /
+`dna_match` / `find_matches` (0.1.x was `(reference, query)`).
 
 ### `SellyAssociativeMemory(alphabet, threshold)`
 Core FFT search engine with `encode()`, `encode_target()`, `encode_probe()`,
-`search()`, `search_direct()`.
+`search()`, `search_direct()`, `best_score()`.  Alphabets must be non-empty
+and duplicate-free (validated at construction).
 
 ### `DNAAssociativeMemory(threshold)`
 DNA/RNA-specialized subclass with `find_matches(probe, target)`.
 
-### `TextAssociativeMemory(case_sensitive, alphabet, threshold)`
+### `TextAssociativeMemory(case_sensitive, alphabet, threshold, dtype)`
 Text / large-alphabet subclass using one-hot encoding for exact
 discrimination.  Adds `find_matches(probe, target)`, `build_alphabet(*texts)`,
 and case-folding.  Functional shortcut: `text_match(probe, reference)`.
+Input is NFC-normalized (composed and decomposed Unicode forms match).
+`dtype=np.float32` halves the encoded memory footprint (752 → 376
+bytes/char with the default 94-symbol alphabet).  Note: case folding can
+change string length (`"ß"` → `"SS"`); match positions are reported in the
+normalized string's coordinates.
 
 ### `Match(position, score, significance)`
 Dataclass for match results.
+
+## v0.3.0 Features
+
+**`find_spans(probe, target)`** — like `find_matches`, but returns `Span`
+objects carrying the matched *text* and coordinates in your **original
+string**, correctly mapped even when normalization changed the length
+(`"ß"` → `"SS"`, NFC). Every hit can be pointed at in your own text.
+
+**`threshold="auto"`** — significance-gated reporting. Instead of a fixed
+score floor, a position is reported only if its match count is
+statistically significant under the exact binomial null
+(`p ≤ AUTO_P = 1e-3`). Calibrated for short probes: a single chance
+symbol in a 6-char probe is correctly *not* reported.
+
+**`search_many(probes, target_encoded)`** — batch search sharing the
+target's channel FFTs across all probes (one transform per channel
+total). The economical shape for scanning many probes over one corpus.
+
+**`dtype=np.uint8`** — encodes the one-hot target at **1 byte/char/channel**
+(94 bytes/char with the default alphabet, vs 752 for float64).
+
+**CLI** — `selly scan PROBE FILE... [--threshold 0.9|auto]
+[--case-sensitive] [--float32|--uint8] [--build-alphabet] [--context N]`.
+Grep-like exit codes (0 = found, 1 = none, 2 = error).
+
+```bash
+selly scan "brentwood protocol" docs/ --threshold auto --context 40
+```
 
 ## Benchmarks
 

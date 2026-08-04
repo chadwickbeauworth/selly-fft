@@ -70,7 +70,7 @@ class TestBenchmarkFFTvsNaive:
 
         # FFT
         t0 = time.perf_counter()
-        fft_score = holographic_match(reference, probe, alphabet=dna_alphabet)
+        fft_score = holographic_match(probe, reference, alphabet=dna_alphabet)
         t_fft = time.perf_counter() - t0
 
         print(f"\n  size={size:5d}  FFT={t_fft*1000:8.3f}ms  score={fft_score:.4f}", end="")
@@ -90,10 +90,10 @@ class TestBenchmarkFFTvsNaive:
         reference = random_dna[:size]
 
         # Warm up
-        _ = holographic_match(reference, probe, alphabet=dna_alphabet)
+        _ = holographic_match(probe, reference, alphabet=dna_alphabet)
 
         t0 = time.perf_counter()
-        fft_score = holographic_match(reference, probe, alphabet=dna_alphabet)
+        fft_score = holographic_match(probe, reference, alphabet=dna_alphabet)
         t_fft = time.perf_counter() - t0
 
         t0 = time.perf_counter()

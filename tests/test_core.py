@@ -28,20 +28,20 @@ class TestRun112BugFix:
     def test_exact_substring_match_is_one(self):
         """An exact substring match must score ~1.0."""
         from selly_fft import holographic_match
-        s = holographic_match("ACGTACGT", "ACGT")
+        s = holographic_match("ACGT", "ACGTACGT")
         assert s > 0.99
 
     def test_total_nonmatch_is_near_zero(self):
         """A complete non-match must NOT score 0.707 (the Run-112 bug)."""
         from selly_fft import holographic_match
-        s = holographic_match("AAAAAAAA", "GGGG")
+        s = holographic_match("GGGG", "AAAAAAAA")
         assert s < 0.6  # was 0.707 with the buggy method
 
     def test_exact_beats_nonmatch_substantially(self):
         """Exact match must be strictly and substantially higher than non-match."""
         from selly_fft import holographic_match
-        exact = holographic_match("ACGTACGT", "ACGT")
-        nonmatch = holographic_match("AAAAAAAA", "GGGG")
+        exact = holographic_match("ACGT", "ACGTACGT")
+        nonmatch = holographic_match("GGGG", "AAAAAAAA")
         assert exact > nonmatch + 0.3
 
     def test_full_self_match_is_one(self):
@@ -196,7 +196,7 @@ class TestProperties:
         # probes with 0, 1, 2, 3, 4 matches against target[0:4]="ACGT"
         scores = []
         for probe in ["TTTT", "ACCC", "ACGC", "ACGT"]:
-            scores.append(holographic_match(target, probe))
+            scores.append(holographic_match(probe, target))
         # 0 matches: TTTT vs ACGT (all different phasors)
         # 1 match: ACCC
         # 2 matches: ACGC

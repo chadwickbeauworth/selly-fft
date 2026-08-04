@@ -8,7 +8,8 @@
 > are included so the tester can read and probe them directly.
 
 **Library:** `selly-fft` · **Location:** `~/taochadwick/selly-fft`
-**Version:** 0.1.1 · **Latest commit:** `bf8d922` (2026-08-04)
+**Version:** 0.3.0 (stress-test fixes + find_spans / auto-threshold /
+batch search / CLI / uint8; see §7 and README "v0.3.0 Features")
 **License:** MIT · **Status:** local only, **not yet pushed to GitHub**
 
 ---
@@ -79,9 +80,12 @@ symbols are **exactly orthogonal** regardless of `L`.
   are actually transformed, so practical cost tracks distinct query symbols).
 
 ### Auto-routing
-`holographic_match()` uses unit-circle for alphabets **≤ 8 symbols** and
-switches to one-hot for **> 8 symbols** (`SHARP_ENCODING_THRESHOLD = 8` in
-`func.py`). The `DNAAssociativeMemory` class is hard-wired to unit-circle
+`holographic_match()` uses unit-circle for alphabets **≤ 4 symbols** and
+switches to one-hot for **> 4 symbols** (`SHARP_ENCODING_THRESHOLD = 4` in
+`func.py`). 4 is the largest alphabet where unit-circle stays exact (≥ 90°
+separation); at 6–8 symbols an adjacent-symbol non-match scored ≥ 0.5, so
+the 0.1.x cutoff of 8 was miscalibrated (found in stress testing, fixed in
+0.2.0). The `DNAAssociativeMemory` class is hard-wired to unit-circle
 (4 symbols, 90°); the `TextAssociativeMemory` class is hard-wired to one-hot.
 
 ---
@@ -318,7 +322,11 @@ def text_match(probe: str, reference: str, *, threshold: float = 0.5) -> List[Ma
     return mem.find_matches(probe, reference)
 ```
 
-### 6b. `func.py` — the auto-routing one-shot (full)
+### 6b. `func.py` — the auto-routing one-shot (v0.2.0)
+
+> **Note:** the embedded listings in §6a and §6c are v0.1.1 snapshots;
+> the repo source is authoritative. This §6b listing was updated to
+> v0.2.0 because the changes here were the head of the stress-test fixes.
 
 ```python
 """Functional convenience API for quick one-shot matching."""
@@ -327,54 +335,37 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import numpy as np
-
 from selly_fft.core import (
     SellyAssociativeMemory,
-    Match,
 )
 from selly_fft.text import TextAssociativeMemory, TEXT_ALPHABET
 
 # Beyond this alphabet size the unit-circle phasor encoding (fixed 360°)
 # gives adjacent symbols too little angular separation to discriminate
-# (e.g. a 36-symbol alphabet separates neighbours by only 10° → cos 10°
-# ≈ 0.985).  For alphabets larger than this we switch to exact one-hot
-# (orthogonal) encoding so a total non-match scores 0.0 regardless of size.
-SHARP_ENCODING_THRESHOLD = 8
+# sharply: exact discrimination requires >= 90° separation, which only
+# alphabets of 4 or fewer symbols achieve (e.g. DNA A/T/C/G at 90°).
+# At 6-8 symbols an *adjacent-symbol* total non-match scores
+# cos(2π/L) >= 0.5 — a false hit under the default threshold — so for
+# alphabets larger than this we switch to exact one-hot (orthogonal)
+# encoding, where a total non-match scores 0.0 regardless of size.
+SHARP_ENCODING_THRESHOLD = 4
 
 
 def holographic_match(
+    probe: Sequence,
     reference: Sequence,
-    query: Sequence,
     *,
     alphabet: Sequence = TEXT_ALPHABET,
     threshold: float = 0.5,
 ) -> float:
     """Compute the best normalized holographic match score.
 
-    Parameters
-    ----------
-    reference : sequence
-        The target/database sequence (longer).
-    query : sequence
-        The probe to search for (shorter).
-    alphabet : sequence, optional
-        Symbol alphabet.  When it has more than
-        ``SHARP_ENCODING_THRESHOLD`` symbols the function uses exact
-        one-hot (orthogonal) encoding for sharp discrimination; smaller
-        alphabets use the patent-faithful unit-circle phasor encoding,
-        which is exact for 4-symbol DNA-style sets at 90° separation.
-    threshold : float, optional
-        Minimum score to report.  Does not affect the return value of
-        this function — it always returns the best score.
-
-    Returns
-    -------
-    float
-        Best normalized cross-correlation score in ``[0, 1]``.
-        1.0 = exact match, 0.0 = no match / empty input.
+    probe first, reference second (unified with text_match/dna_match in
+    0.2.0; 0.1.x was (reference, query)).  Always returns the best
+    UNTHRESHOLDED score in [0, 1] via SellyAssociativeMemory.best_score;
+    threshold is accepted for API compatibility only.
     """
-    if len(query) == 0 or len(reference) == 0:
+    if len(probe) == 0 or len(reference) == 0:
         return 0.0
     if len(alphabet) > SHARP_ENCODING_THRESHOLD:
         mem: SellyAssociativeMemory = TextAssociativeMemory(
@@ -382,10 +373,7 @@ def holographic_match(
         )
     else:
         mem = SellyAssociativeMemory(alphabet=alphabet, threshold=threshold)
-    matches = mem.search_direct(query, reference)
-    if not matches:
-        return 0.0
-    return float(max(m.score for m in matches))
+    return mem.best_score(probe, reference)
 ```
 
 ### 6c. `core.py` — the one-hot correlation primitive (full)
@@ -465,12 +453,13 @@ def normalized_xcorr_multichannel(
 These are **real, documented** weak spots. The stress-test session should
 try to break or quantify each:
 
-1. **`Match.significance` is miscalibrated for text.** In `core.py`,
-   `_significance` hardcodes `expected = 1/sqrt(36)` — the old 36-symbol
-   alphabet. The text alphabet has **94 symbols**, so the null expected
-   value should be `1/sqrt(94) ≈ 0.103`, not `0.167`. For Unicode it is
-   worse still. *Question:* does this inflate z-scores enough to matter in
-   practice?
+1. **✅ FIXED (0.2.0) — `Match.significance` was miscalibrated for text.**
+   `_significance` hardcoded `expected = 1/sqrt(36)` — the old 36-symbol
+   alphabet. Worse, that null model (unit-circle magnitude) is the wrong
+   *distribution* for one-hot scores, which are match *fractions* with a
+   Binomial(n, 1/L) null. 0.2.0 makes `_significance` an instance method
+   that uses the actual alphabet size and, for the orthogonal path, the
+   binomial null.
 
 2. **Inconsistent out-of-alphabet contract.** A symbol absent from the
    alphabet in the **probe** raises `ValueError`; in the **target** it is
@@ -478,21 +467,38 @@ try to break or quantify each:
    in `"a€bc"` scores **0.666** (the `€` vanishes, `a_c` matches 2/3 of
    `a_bc`). Is that the behavior you want, or should target OOB also error?
 
-3. **One-hot memory scales with alphabet size.** At ~94 floats/char, a 1 MB
-   Unicode document encodes to ~80 MB. *Question:* where does that hurt?
+3. **One-hot memory scales with alphabet size.** At 94 float64 channels
+   the encoded target costs **752 bytes/char — a 1 MB text encodes to
+   ~750 MB** (an earlier draft of this note said ~80 MB; that was a
+   ~9× underestimate). 0.2.0 adds `dtype=np.float32` to
+   `TextAssociativeMemory` / `encode_orthogonal`, halving this to
+   ~376 bytes/char. *Open:* a sparse/bitset encoding could go much
+   further.
 
 4. **Score = match fraction, not edit distance.** Transpositions
    (`"ACTG"` vs `"AGCT"`) score lower than single substitutions, even
    though intuitively "closer". Is fraction-of-matching-positions the right
    similarity measure for your use, or do you want Levenshtein-style?
 
-5. **Unicode normalization.** `build_alphabet` keys on raw code points, so
-   `é` (U+00E9) and `e` + combining acute (U+0301) are *different* symbols.
-   *Question:* should the library NFC-normalize first?
+5. **✅ FIXED (0.2.0) — Unicode normalization.** `TextAssociativeMemory._norm`
+   now NFC-normalizes (before *and* after case folding), so `é` (U+00E9)
+   and `e` + combining acute (U+0301) match. *Residual caveat:* folding
+   can change string length (`ß` → `SS`), and match positions are reported
+   in the *normalized* string's coordinates — documented in the class
+   docstring and README.
 
-6. **Auto-routing threshold at 8 symbols.** A custom 9-symbol alphabet
-   silently switches from unit-circle to one-hot. *Question:* is 8 the right
-   cutoff, and does it surprise users?
+6. **✅ FIXED (0.2.0) — auto-routing threshold was 8, now 4.** Stress
+   testing showed the 0.1.x cutoff *violated the acceptance criterion*:
+   at 6–8 symbols an adjacent-symbol total non-match scored
+   `cos(2π/L) ≥ 0.5` (0.500 / 0.624 / 0.707) and was reported as a match.
+   Unit-circle is only exact for L ≤ 4 (≥ 90° separation), so the cutoff
+   is now 4. Also fixed in 0.2.0, from the same stress test:
+   `holographic_match` returned 0.0 when the best score fell below
+   `threshold` (contradicting its docstring) — it now always returns the
+   best unthresholded score; its argument order was unified to
+   **(probe, reference)** to match `text_match` / `dna_match`; and
+   alphabets are validated (non-empty, unique) at construction, with
+   explicit text alphabets folded consistently with `build_alphabet`.
 
 ---
 

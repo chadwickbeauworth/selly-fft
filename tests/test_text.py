@@ -120,16 +120,16 @@ def test_whitespace_included_in_default_alphabet():
 # holographic_match routing
 # ---------------------------------------------------------------------------
 def test_holographic_match_text_is_sharp():
-    assert holographic_match("THEQUICKBROWNFOX", "BROWN") == pytest.approx(1.0)
-    assert holographic_match("THEQUICKBROWNFOX", "ZZZZZ") == pytest.approx(0.0)
-    assert holographic_match("AAAAAAAAAA", "BBBBB") == pytest.approx(0.0)
-    assert holographic_match("Hello, World!", "World") == pytest.approx(1.0)
+    assert holographic_match("BROWN", "THEQUICKBROWNFOX") == pytest.approx(1.0)
+    assert holographic_match("ZZZZZ", "THEQUICKBROWNFOX") == pytest.approx(0.0)
+    assert holographic_match("BBBBB", "AAAAAAAAAA") == pytest.approx(0.0)
+    assert holographic_match("World", "Hello, World!") == pytest.approx(1.0)
 
 
 def test_holographic_match_small_alphabet_still_dna_exact():
     # 4-symbol alphabet routes to unit-circle (exact for 90° separation)
-    assert holographic_match("ACGTACGT", "ACGT", alphabet="ACGT") == pytest.approx(1.0)
-    assert holographic_match("AAAAAAAA", "GGGG", alphabet="AGCT") == pytest.approx(0.0)
+    assert holographic_match("ACGT", "ACGTACGT", alphabet="ACGT") == pytest.approx(1.0)
+    assert holographic_match("GGGG", "AAAAAAAA", alphabet="AGCT") == pytest.approx(0.0)
 
 
 def test_holographic_match_empty_returns_zero():
