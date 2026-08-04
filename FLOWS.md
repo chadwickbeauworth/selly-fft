@@ -26,7 +26,7 @@ a sharpness guarantee**, not a search engine.
 | Knob | When |
 |---|---|
 | `threshold=0.7–0.8` | fuzzy phrase spotting (1–3 typos in a 15–25 char probe) |
-| `threshold="auto"` | autonomous/unattended runs — statistics picks the cutoff (exact binomial, p ≤ 1e-3). **Default choice for lanes and cron.** |
+| `threshold="auto"` | autonomous/unattended runs — statistics picks the cutoff (exact binomial, p ≤ 1e-3). **Default choice for lanes and cron.** ⚠️ reports *significant partials* too (score 0.2 can be p≈1e-6 on large alphabets) — it's "statistically-significant spans", not "exact-match-only". Pair with a score floor if you want strong matches only. |
 | `dtype=np.uint8` | corpus > ~500 KB (94 bytes/char vs 752) |
 | `dtype=np.float32` | middle ground, slight accuracy margin |
 | `build_alphabet(*texts)` | any non-ASCII corpus (accents, CJK, emoji) |
@@ -177,6 +177,16 @@ chance-plausible; a 12-mer is not — the gate knows the difference.
 
 ## 9. Honest limits — don't reach for it when
 
+- **`threshold="auto"` is significance, not similarity.** It reports any
+  span whose match count is unlikely by chance — on a 94-symbol alphabet
+  that includes low-scoring partials (6/29 matching, score 0.2, passes at
+  p≈1e-6). Correct statistics, but if a lane expects "clean matches only",
+  use a float threshold (or post-filter hits by score).
+- **`search()` needs a pre-encoded target.** Passing a raw string raises
+  `TypeError` by design — use `search_direct()` / `find_matches()` /
+  `find_spans()` for raw text, `search()` only with `encode_target()`
+  output. Probe longer than target → empty results everywhere, and
+  `best_score` → 0.0.
 - **Exact substring** → `str.find` (~1500× faster).
 - **Patterns** (emails, IDs) → regex.
 - **Transpositions/swaps matter** → `rapidfuzz` (selly-fft scores a swap

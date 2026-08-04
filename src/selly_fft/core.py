@@ -554,8 +554,11 @@ class SellyAssociativeMemory:
         threshold : float or "auto", optional
             Override the instance threshold.  ``"auto"`` gates on
             statistical significance instead of a fixed score: a
-            position is reported only if its z-score against the
-            encoding's null model reaches ``AUTO_Z``.
+            position is reported if its match count is significant
+            under the exact binomial null (``p <= AUTO_P``).  Note that
+            on large alphabets even a *low-scoring* span can be
+            significant — ``"auto"`` reports significant partial
+            matches, not just near-exact ones.
 
         Returns
         -------
@@ -563,6 +566,13 @@ class SellyAssociativeMemory:
             Matches sorted by score descending.
         """
         thr = self._resolve_threshold(threshold)
+        if not isinstance(target_encoded, np.ndarray):
+            raise TypeError(
+                f"search() expects a pre-encoded target (np.ndarray from "
+                f"encode_target), got {type(target_encoded).__name__}. "
+                f"For raw probe/target data use search_direct() or "
+                f"find_matches() instead."
+            )
         probe = self.encode(probe_data)
         scores = self._score_array(probe, target_encoded)
         return self._collect_matches(scores, thr, len(probe_data))

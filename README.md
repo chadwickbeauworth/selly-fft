@@ -169,7 +169,11 @@ string**, correctly mapped even when normalization changed the length
 score floor, a position is reported only if its match count is
 statistically significant under the exact binomial null
 (`p ≤ AUTO_P = 1e-3`). Calibrated for short probes: a single chance
-symbol in a 6-char probe is correctly *not* reported.
+symbol in a 6-char probe is correctly *not* reported. Note: on large
+alphabets even low-scoring spans can be significant (6/29 matches,
+score 0.2, is p≈1e-6 by chance) — **`auto` surfaces significant
+*partial* matches, not just near-exact ones.** Combine with a score
+floor (`threshold=0.5`) if you only want strong matches.
 
 **`search_many(probes, target_encoded)`** — batch search sharing the
 target's channel FFTs across all probes (one transform per channel

@@ -108,6 +108,36 @@ def test_invalid_threshold_string_raises():
         mem.find_matches("A", "AAA", threshold="bogus")
 
 
+def test_auto_threshold_reports_significant_partials():
+    """Pinned behavior (flagged in review): 'auto' is significance, not
+    similarity. 6/29 matching symbols on a 94-symbol alphabet is
+    p~1e-6 by chance, so a 0.2-scoring span IS reported."""
+    mem = TextAssociativeMemory()
+    probe = "A" * 6 + "Z" * 23
+    target = "xxxxx " + "A" * 6 + "Q" * 23 + " xxxxx"
+    matches = mem.find_matches(probe, target, threshold="auto")
+    assert matches and matches[0].score == pytest.approx(6 / 29, rel=1e-3)
+
+
+def test_search_rejects_raw_target_with_guidance():
+    """search() takes a pre-encoded target; raw input must fail loudly
+    and point at the right API (was a cryptic ValueError)."""
+    mem = TextAssociativeMemory()
+    with pytest.raises(TypeError, match="search_direct"):
+        mem.search("World", "Hello")
+    base = SellyAssociativeMemory(alphabet="ATCG")
+    with pytest.raises(TypeError, match="search_direct"):
+        base.search(list("ACGT"), "ACGTACGT")
+
+
+def test_probe_longer_than_target_is_empty_everywhere():
+    mem = TextAssociativeMemory()
+    assert mem.search_direct("World", "Hell") == []
+    assert mem.find_matches("World", "Hell") == []
+    assert mem.find_spans("World", "Hell") == []
+    assert mem.best_score("World", "Hell") == 0.0
+
+
 def test_auto_threshold_on_unit_circle_path():
     mem = SellyAssociativeMemory(alphabet="ATCG")
     # an exact 8-mer match: p = (1/4)^8 ~ 1.5e-5 < AUTO_P -> reported
