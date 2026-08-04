@@ -96,6 +96,55 @@ def encode_unit_circle(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
 encode_symbols = encode_unit_circle
 
 
+def encode_orthogonal(symbols: Sequence, alphabet: Sequence) -> np.ndarray:
+    """Encode symbols as mutually orthogonal (one-hot) vectors.
+
+    Each symbol maps to a unit basis vector ``e_k`` of dimension
+    ``L = len(alphabet)``.  Distinct symbols are *exactly* orthogonal
+    (inner product 0) regardless of alphabet size, so the normalized
+    cross-correlation becomes the true fraction of matching positions.
+
+    Why this exists
+    ---------------
+    :func:`encode_unit_circle` packs every symbol onto a single circle,
+    so two *different* symbols separated by a small angle still
+    correlate strongly: with the 36-symbol default alphabet ``'A'`` and
+    ``'B'`` are only 10° apart and score ``cos(10°) ≈ 0.985``.  That is
+    fine for a 4-symbol alphabet at 90° separation (DNA), but it makes
+    large-alphabet text search unusable — a total non-match reads as a
+    near-perfect hit.
+
+    One-hot encoding removes the angular crosstalk entirely at the cost
+    of ``L``x memory and an ``L``-channel correlation.
+
+    Parameters
+    ----------
+    symbols : sequence
+        Ordered symbols to encode.
+    alphabet : sequence
+        Ordered set defining the symbol→index mapping.
+
+    Returns
+    -------
+    np.ndarray
+        Real-valued array of shape ``(len(symbols), L)``, one one-hot
+        row per symbol.
+
+    Raises
+    ------
+    ValueError
+        If a symbol is not present in ``alphabet``.
+    """
+    idx = _alphabet_index(alphabet)
+    L = len(idx)
+    out = np.zeros((len(symbols), L), dtype=np.float64)
+    for i, sym in enumerate(symbols):
+        if sym not in idx:
+            raise ValueError(f"symbol {sym!r} not in alphabet")
+        out[i, idx[sym]] = 1.0
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Correlation primitives
 # ---------------------------------------------------------------------------
@@ -199,6 +248,74 @@ def normalized_xcorr(query: np.ndarray, reference: np.ndarray) -> np.ndarray:
     # clamp: anti-correlated (cos = -1) → 0; exact match (cos = +1) → 1
     scores = np.clip(scores, 0.0, 1.0)
     return scores
+
+
+def normalized_xcorr_multichannel(
+    query: np.ndarray, reference: np.ndarray
+) -> np.ndarray:
+    r"""Normalized cross-correlation for multi-channel (one-hot) encodings.
+
+    Accepts 2-D arrays of shape ``(n_symbols, n_channels)`` — the output
+    of :func:`encode_orthogonal` — and correlates each channel
+    independently via FFT, summing the results.  Because one-hot
+    channels are mutually orthogonal, the summed correlation at shift
+    ``k`` equals the exact **count of matching symbols**, and dividing
+    by the query length yields the true match fraction.
+
+    This is the sharp path: distinct symbols contribute exactly 0, so a
+    total non-match scores 0.0 no matter how large the alphabet is.
+
+    Complexity is ``O(L · (n+m) log(n+m))`` for an ``L``-symbol
+    alphabet.  Only channels actually present in the query are
+    transformed, so the practical cost scales with the number of
+    *distinct symbols in the query*, not the full alphabet size.
+
+    Parameters
+    ----------
+    query, reference : np.ndarray
+        2-D arrays of shape ``(n_symbols, n_channels)`` with matching
+        channel counts.
+
+    Returns
+    -------
+    np.ndarray
+        Scores in ``[0, 1]`` over the valid region — the fraction of
+        exactly-matching symbol positions at each shift.
+    """
+    a = np.asarray(query, dtype=np.float64)
+    b = np.asarray(reference, dtype=np.float64)
+    if a.ndim != 2 or b.ndim != 2:
+        raise ValueError("multichannel correlation requires 2-D (n, channels) arrays")
+    if a.shape[1] != b.shape[1]:
+        raise ValueError(
+            f"channel mismatch: query has {a.shape[1]}, reference has {b.shape[1]}"
+        )
+    na, nb = a.shape[0], b.shape[0]
+    if na == 0 or nb == 0 or na > nb:
+        return np.zeros(0, dtype=np.float64)
+
+    n_valid = nb - na + 1
+    nfft = 1
+    while nfft < na + nb - 1:
+        nfft <<= 1
+
+    # Correlate channel-by-channel; skip channels absent from the query
+    # (their contribution to the match count is identically zero).
+    total = np.zeros(nfft, dtype=np.float64)
+    active = np.flatnonzero(a.any(axis=0))
+    for ch in active:
+        A = np.zeros(nfft, dtype=np.float64)
+        B = np.zeros(nfft, dtype=np.float64)
+        A[:na] = a[:, ch]
+        B[:nb] = b[:, ch]
+        prod = np.conj(np.fft.rfft(A)) * np.fft.rfft(B)
+        total += np.fft.irfft(prod, n=nfft)
+
+    matches = total[:n_valid]
+    # Each matching position contributes exactly 1.0; normalize by query
+    # length to get the match fraction.
+    scores = matches / float(na)
+    return np.clip(scores, 0.0, 1.0)
 
 
 # ---------------------------------------------------------------------------

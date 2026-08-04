@@ -24,23 +24,31 @@ from selly_fft.core import (
     SellyAssociativeMemory,
     Match,
     encode_unit_circle,
+    encode_orthogonal,
     normalized_xcorr,
+    normalized_xcorr_multichannel,
     linear_correlation,
     DEFAULT_ALPHABET,
 )
 from selly_fft.dna import DNAAssociativeMemory, dna_match
+from selly_fft.text import TextAssociativeMemory, text_match, TEXT_ALPHABET
 from selly_fft.func import holographic_match
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "SellyAssociativeMemory",
     "DNAAssociativeMemory",
+    "TextAssociativeMemory",
     "Match",
     "holographic_match",
     "dna_match",
+    "text_match",
     "encode_unit_circle",
+    "encode_orthogonal",
     "normalized_xcorr",
+    "normalized_xcorr_multichannel",
     "linear_correlation",
     "DEFAULT_ALPHABET",
+    "TEXT_ALPHABET",
 ]

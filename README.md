@@ -18,6 +18,18 @@ Each symbol is encoded as a complex phasor on the unit circle
 via the convolution theorem, giving **O((n+m) log(n+m))** complexity
 instead of the naive O(n·m).
 
+Two encodings are available, auto-selected by alphabet size:
+
+* **Unit-circle phasor** (`encode_unit_circle`) — the patent-faithful
+  encoding.  Exact for small alphabets where symbols sit ≥90° apart
+  (e.g. DNA, A/T/C/G at 90°).  For alphabets larger than 8 symbols the
+  angular separation shrinks and adjacent symbols correlate, so the
+  library **switches automatically** to the sharp path below.
+* **One-hot (orthogonal)** (`encode_orthogonal`) — used for large
+  alphabets (text).  Distinct symbols are exactly orthogonal, so a total
+  non-match scores **0.0** regardless of alphabet size.  This is the
+  path that makes text search as sharp as DNA search.
+
 ### Key correction over the published design spec
 
 The Run-112 design spec described a unit-circle encoding with *circular*
@@ -36,6 +48,15 @@ This library fixes that bug with three changes (documented in
 3. **Match-filter normalization + real-part scoring** —
    `Re(corr) / (||probe|| · ||ref_window||)` = `cos(Δθ)` per symbol,
    yielding exactly 1.0 for a match, 0.0 for a total non-match.
+
+### Large-alphabet (text) sharpness
+
+The earlier implementation packed every symbol onto a single circle, so
+`"AAAAAAAAAA"` vs `"BBBBB"` scored **0.985** under the 36-symbol default
+alphabet — a non-match read as a near-perfect hit, and lowercase/punctuation
+raised `ValueError`.  The one-hot path fixes this: the normalized
+cross-correlation becomes the exact **fraction of matching positions**,
+independently of alphabet size.  See `tests/test_text.py`.
 
 ## Quick Start
 
@@ -62,6 +83,32 @@ target = mem.encode_target(list("ATCGATCGATCG"))
 probe = list("ATCG")
 results = mem.search(probe, target)
 ```
+
+### Text / large-alphabet search
+
+The same API works for text. `TextAssociativeMemory` (and the functional
+`text_match`) use exact one-hot encoding, so discrimination is independent
+of alphabet size — matching the DNA path's sharpness. Lowercase, spaces,
+and punctuation are handled; matching is case-insensitive by default.
+
+```python
+from selly_fft import TextAssociativeMemory, text_match
+
+mem = TextAssociativeMemory()  # case-insensitive by default
+for m in mem.find_matches("brown", "THE QUICK BROWN FOX"):
+    print(m.position, m.score)          # → 10 1.0
+
+# One-shot
+text_match("world", "Hello, World!")    # → [Match(position=7, score=1.0, ...)]
+
+# Arbitrary Unicode — derive the alphabet from your data
+mem.build_alphabet("un café naïve 日本語")
+mem.find_matches("café", "UN CAFÉ NAÏVE")  # → [Match(position=3, score=1.0, ...)]
+```
+
+`holographic_match` auto-selects the sharp path for alphabets larger than
+8 symbols (e.g. `holographic_match("Hello, World!", "World") → 1.0`, and
+a total non-match like `"AAAAAAAAAA"` vs `"BBBBB"` → `0.0`).
 
 ## DNA/RNA Sequence Matching
 
@@ -93,6 +140,11 @@ Core FFT search engine with `encode()`, `encode_target()`, `encode_probe()`,
 
 ### `DNAAssociativeMemory(threshold)`
 DNA/RNA-specialized subclass with `find_matches(probe, target)`.
+
+### `TextAssociativeMemory(case_sensitive, alphabet, threshold)`
+Text / large-alphabet subclass using one-hot encoding for exact
+discrimination.  Adds `find_matches(probe, target)`, `build_alphabet(*texts)`,
+and case-folding.  Functional shortcut: `text_match(probe, reference)`.
 
 ### `Match(position, score, significance)`
 Dataclass for match results.
