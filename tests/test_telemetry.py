@@ -34,8 +34,94 @@ from selly_fft.telemetry import (
     aggregate_telemetry,
     convergence_curve,
     default_claim_extractor,
+    load_runs_from_directory,
     run_telemetry,
 )
+
+
+# ---------------------------------------------------------------------------
+# API ergonomics + performance regression (selly-fft v0.4.1)
+# ---------------------------------------------------------------------------
+
+class TestApiErgonomicsAndScale:
+    def test_tuple_from_loader_unwraps(self, tmp_path):
+        """load_runs_from_directory returns (texts, labels); passing that
+        tuple straight into convergence_curve / run_telemetry must work
+        (regression: it used to raise TypeError, and len() returned 2 —
+        the tuple arity, not the file count)."""
+        for i in range(1, 6):
+            (tmp_path / f"Run-{i:02d}-T.md").write_text(f"Content {i} shared term here.")
+        loaded = load_runs_from_directory(str(tmp_path))
+        # Naive composition must NOT raise.
+        curve = convergence_curve(loaded, max_claims=5)
+        assert len(curve) == 5
+        # run_telemetry form too.
+        rt = run_telemetry(loaded, max_claims=5)
+        assert len(rt) == 5
+        # The first run is always 0.0 (no prior corpus); later runs echo 'shared term'.
+        assert rt[0].mean_best_score == 0.0
+        assert all(r.mean_best_score > 0.0 for r in rt[1:])
+
+    def test_len_of_loader_tuple_is_two_not_filecount(self, tmp_path):
+        """Document the trap: len(loader_return) is the tuple arity (2),
+        not the file count.  Callers must unpack or rely on unwrap."""
+        for i in range(1, 4):
+            (tmp_path / f"Run-{i:02d}-T.md").write_text(f"Content {i}.")
+        loaded = load_runs_from_directory(str(tmp_path))
+        assert len(loaded) == 2  # (texts, labels)
+        assert len(loaded[0]) == 3  # real file count
+
+    def test_large_corpus_completes_quickly(self, tmp_path):
+        """The coherence pass must FINISH on a large corpus (the original
+        per-prefix loop was O(R·C log C) and hung on a 143-run corpus).
+
+        This single-pass design correlates each DISTINCT claim against the
+        whole corpus once (shared reference FFT, duplicate claims computed
+        once) then takes a running prefix-max per run.  On a 120-file corpus
+        it completes in a bounded time (a few minutes) — it must not hang.
+        We assert a generous bound so CI catches a genuine regression to the
+        old O(R·C log C) behavior, while tolerating the intrinsic FFT cost of
+        correlating hundreds of distinct claims against a ~1 MB corpus."""
+        import time
+
+        rng = np.random.default_rng(0)
+        words = ["quantum", "holographic", "memory", "coherence", "methods",
+                 "tensor", "photon", "code", "error", "correction"]
+        n = 120
+        runs = []
+        for i in range(n):
+            sent = " ".join(rng.choice(words) for _ in range(200))
+            runs.append(f"Run {i}: {sent}")
+        for i, r in enumerate(runs, 1):
+            (tmp_path / f"Run-{i:03d}-X.md").write_text(r)
+
+        t0 = time.time()
+        rt = run_telemetry(runs, max_claims=10)
+        dt = time.time() - t0
+        assert len(rt) == n
+        # Generous bound: catches a regression to O(R·C log C) hang while
+        # allowing the intrinsic FFT cost on a ~1 MB corpus.
+        assert dt < 300.0, f"large-corpus telemetry took {dt:.1f}s (>300s)"
+
+    def test_scores_match_reference_prefix_semantics(self):
+        """Run i's coherence must equal the best score against the PREFIX
+        (runs 0..i-1), not the full corpus.  Construct a case where a claim
+        appears ONLY in a later run, so a naive full-corpus search would
+        wrongly credit it to an earlier run."""
+        runs = [
+            "alpha beta gamma delta epsilon",          # run 0 origin
+            "alpha beta gamma delta epsilon zeta",      # echoes run 0
+            "unique later phrase only here omega",      # introduces a new claim
+            "alpha beta gamma delta epsilon unique later phrase only here",  # echoes both
+        ]
+        rt = run_telemetry(runs, max_claims=20)
+        # Run 2's only novel claim must NOT score near 1.0 against runs 0..1
+        # (it is not in the prefix). A small partial-match score is expected
+        # from incidental word overlap; what matters is it is far below the
+        # score once the claim IS in the prefix (run 3).
+        assert rt[2].mean_best_score < 0.5  # novel claim not yet in prefix
+        assert rt[3].mean_best_score > rt[2].mean_best_score  # now in prefix
+
 
 
 # ---------------------------------------------------------------------------

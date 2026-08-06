@@ -4,6 +4,34 @@ All notable changes to selly-fft are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-08-06
+
+### Fixed
+
+- **`convergence_curve` / `run_telemetry` now accept the `(texts, labels)`
+  tuple returned by `load_runs_from_directory` directly.** The naive
+  composition `runs = load_runs_from_directory(dir); curve = convergence_curve(runs)`
+  previously raised `TypeError` (the labels list was fed to the claim
+  extractor). Worse, `len(runs)` returned **2** (the tuple arity), which
+  read exactly like "2 files loaded" and silently understated a 143-file
+  corpus. Both functions now unwrap the tuple automatically. (Reported by
+  orchestrator review of Run-134.)
+
+- **Performance: replaced the per-prefix search loop with a correct
+  single-pass design.** The original loop re-searched each run's growing
+  prefix separately, making the whole computation O(R·C log C) — it hung
+  on a 143-run corpus. The new design correlates each **distinct** claim
+  against the whole corpus once (one shared reference FFT; duplicate
+  claims computed once) and takes a running prefix-maximum per run. This
+  also corrects the module docstring, which falsely claimed O(N): the
+  cost is O(distinct_claims · C log C) — bounded and a few minutes on a
+  ~1 MB corpus, not a hang, but not linear in the number of runs.
+
+### Tests
+
+- 4 new tests in `tests/test_telemetry.py` covering the tuple-unwrap
+  ergonomics and large-corpus completion. Total: 167.
+
 ## [0.4.0] — 2026-08-06
 
 ### Added
