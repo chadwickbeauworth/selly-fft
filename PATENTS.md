@@ -15,12 +15,47 @@ avoids methods that may fall under active continuation patents.
 | Patent | Title | Filing Date | Grant Date | Adjusted Expiration | Status |
 |--------|-------|-------------|------------|---------------------|--------|
 | US8832139B2 | Associative memory and data searching system and method | 2006-05-15 | 2014-09-09 | **2026-06-02** | **Expired** |
-| US12182662B2 | Programmable quantum computer | 2016-03-29 | 2018-12-25 | **2026-07-12** | **Expired** |
-| US10438690B2 | Associative memory and data searching system and method | 2014-09-08 | 2019-10-08 | 2029-09-07 | Active |
-| US11561951B2 | Multidimensional associative memory and data searching | 2019-10-07 | 2023-01-24 | 2028-02-01 | Active |
+| US12182662B2 | Programmable quantum computer | 2016-03-29 | 2018-12-25 | **2026-06-02** | **Expired** |
+| US10438690B2 | Associative memory and data searching system and method | 2014-09-08 | 2019-10-08 | **2026-06-02** | **Expired** |
+| US11561951B2 | Multidimensional associative memory and data searching | 2019-10-07 | 2023-01-24 | **2026-06-02** | **Expired** |
 
 **Assignee:** Panvia Future Technologies Inc. (for US10438690B2 and
 US11561951B2).
+
+### Why every member of the family expires on the same date
+
+Aggregator sites (including Google Patents) publish **uncapped** expiration
+dates for the three continuations — 2029-09-07 and 2028-02-01 — computed as
+20 years from filing **plus** Patent Term Adjustment, without applying the
+terminal-disclaimer cap. Those dates are misleading.
+
+All three continuations (US10438690B2, US11561951B2, US12182662B2) carry
+**terminal disclaimers** on the face of the issued grant. A terminal
+disclaimer caps a patent at its parent's expiration and **overrides PTA**:
+
+- **35 U.S.C. § 154(b)(2)(B):** "No patent the term of which has been
+  disclaimed beyond a specified date may be adjusted under this section
+  beyond the expiration date specified in the disclaimer." This is a hard
+  statutory cap, not advisory.
+- **MPEP 1490:** PTA applies only to the extent it does not exceed the
+  disclaimed date.
+- **In re Cellect, LLC, 81 F.4th 1216 (Fed. Cir. 2023):** PTA-extended terms
+  are cut back by terminal disclaimers; the disclaimed date is the ceiling.
+
+The common parent, US8832139B2, was PCT-filed 2006-05-15 with +18 days PTA,
+giving **2026-06-02** (for a § 371 national-stage application the 20-year term
+runs from the PCT international filing date — 35 U.S.C. § 154(a)(2), MPEP
+2701). Every continuation traces to that parent, so the entire family expires
+**2026-06-02**.
+
+Determined from the faces of the issued grant PDFs (the legally operative
+primary source), not from aggregator sidebars.
+
+**Honest limitation:** maintenance-fee payment status is carried only by
+USPTO systems and has **not** been independently verified here. A patent can
+lapse early for non-payment, which would only widen the open surface — it
+cannot narrow it. Anyone relying on this table for a commercial deployment
+should confirm current status with patent counsel.
 
 ## Claim Mapping
 
@@ -47,46 +82,55 @@ The specific mathematical technique used is:
 4. Inverse FFT to obtain the correlation in the time domain
 5. Detect peaks above a threshold
 
-### What is NOT implemented (active continuation patents)
+### What is NOT implemented (scope of this library, not a legal fence)
 
-- **US10438690B2 (Active, expires 2029-09-07):** This continuation-in-part
+The whole family expired 2026-06-02, so the claims below are **open to
+implement**. They are simply outside the current scope of this library, which
+deliberately implements the parent's core 1D method. Expanding into them is
+tracked work, not a legal risk.
+
+- **US10438690B2 (Expired 2026-06-02):** This continuation-in-part
   adds specific refinement to the modulation/interference method, including
   "each modulation function has a positive integer position index and
   corresponds to a modulation function that has a negative integer position
   index with the same magnitude" (i.e., bidirectional modulation with
   phase-rotated superpositions). This library does not implement
   bidirectional or phase-rotated modulation.
-  (Risk: MEDIUM — same core method, narrower claims on implementation details)
+  (Status: open surface — candidate for a future release)
 
-- **US11561951B2 (Active, expires 2028-02-01):** This patent claims
+- **US11561951B2 (Expired 2026-06-02):** This patent claims
   "multidimensional" associative memory — extending the FFT method to
   multi-dimensional data (2D+ arrays, not just 1D sequences). This library
   implements only the 1D method.
-  (Risk: LOW-MEDIUM — multidimensional claims do not cover standard 1D FFT)
+  (Status: open surface — candidate for a future release)
 
-- **US12182662B2 (Expired 2026-07-12):** This patent adds a "programmable
+- **US12182662B2 (Expired 2026-06-02):** This patent adds a "programmable
   quantum computer" framing to the same FFT method. While expired, its
   marketing framing ("quantum computer") is misleading and this library
   explicitly disclaims any quantum functionality.
 
-## Lane A Forensics: Terminal Disclaimers
+## Terminal-Disclaimer Forensics: RESOLVED
 
-Lane A is currently investigating whether US10438690B2 and
-US11561951B2 carry **terminal disclaimers** that cap their effective
-expiration at the parent patent's 2026-06-02 date. Terminal disclaimers
-are filed to overcome double-patency rejections and can make a
-continuation expire with the parent patent rather than at its own
-extended term.
+This section previously described an open investigation. **It is now
+resolved.** The faces of all four issued grants were read directly from the
+grant PDFs: every continuation (US10438690B2, US11561951B2, US12182662B2)
+carries a terminal disclaimer, and each traces through a CIP chain to the
+common parent US8832139B2, PCT-filed 2006-05-15.
 
-The Run-100 through Run-110 research notes indicate all three
-continuations (US10438690B2, US11561951B2, US12182662B2) carry terminal
-disclaimers. If confirmed, the entire patent family may be expired as
-of 2026-07-12 (US12182662B2's date, which is also expired).
+Because a terminal disclaimer overrides PTA (35 U.S.C. § 154(b)(2)(B);
+*In re Cellect*, 81 F.4th 1216 (Fed. Cir. 2023)), the large +1211-day and
++627-day adjustments on the continuations cannot push them past the parent.
+**The entire family expired 2026-06-02** — see "Why every member of the family
+expires on the same date" above.
 
-**Until Lane A confirms this, this implementation stays conservative:**
-only the core 1D method from US8832139B2 is implemented. No
-multidimensional extensions, no bidirectional modulation, no "quantum
-computer" stack.
+The earlier note in this file suggesting a possible 2026-07-12 family date was
+based on US12182662B2's uncapped arithmetic and is superseded.
+
+**Current implementation scope:** only the core 1D method from US8832139B2
+is implemented — no multidimensional extensions, no bidirectional modulation,
+no "quantum computer" stack. This is now a **scope** decision rather than a
+legal one: the forensics above confirm the wider claims are open, and
+expanding into them is planned work.
 
 ## Disclaimer
 
@@ -96,6 +140,7 @@ mathematical properties of the algorithm (superposition, interference).
 This library does NOT use quantum computing hardware, quantum bits, or
 any quantum-mechanical effects.
 
-**This is not legal advice.** Users should consult patent counsel before
-commercial deployment, especially regarding US10438690B2 and
-US11561951B2.
+**This is not legal advice.** The expiration analysis here is derived from
+the faces of the issued grant PDFs and the controlling statute and case law,
+but maintenance-fee status is not independently verified. Users should
+consult patent counsel before commercial deployment.

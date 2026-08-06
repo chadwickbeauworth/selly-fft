@@ -206,10 +206,20 @@ O((n+m) log(n+m)).
 ## Patent Status
 
 See [PATENTS.md](PATENTS.md) for the full claim-mapping analysis. In
-short: the core 1D FFT method from US8832139B2 is expired and safe to
-implement. Active continuations (US10438690B2, US11561951B2) cover
-refinements and multidimensional extensions that this library does
-**not** implement.
+short: the **entire Selly patent family expired 2026-06-02**. The
+continuations (US10438690B2, US11561951B2, US12182662B2) each carry a
+terminal disclaimer running to the common parent US8832139B2, which caps
+them regardless of Patent Term Adjustment (35 U.S.C. § 154(b)(2)(B);
+*In re Cellect*, 81 F.4th 1216 (Fed. Cir. 2023)). Aggregator sites still
+publish uncapped 2029/2028 dates that ignore those disclaimers.
+
+This library currently implements only the parent's core 1D FFT method.
+The refinements and multidimensional extensions claimed by the
+continuations are **open to implement** — they are outside this library's
+present scope, not behind a legal fence.
+
+Maintenance-fee status is carried only by USPTO systems and has not been
+independently verified; this is not legal advice.
 
 ## License
 
