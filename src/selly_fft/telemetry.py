@@ -286,6 +286,7 @@ def run_telemetry(
     claim_extractor: Optional[ClaimExtractor] = None,
     case_sensitive: bool = False,
     alphabet: Optional[Sequence] = None,
+    dtype: "np.typing.DTypeLike" = np.float64,
 ) -> List[RunTelemetry]:
     """Compute per-run coherence telemetry across a sequence of run texts.
 
@@ -300,8 +301,8 @@ def run_telemetry(
     claim_extractor : callable, optional
         Custom claim extractor.  If None, the default deterministic
         extractor (``_extract_claims_default``) is used.  This is the
-        hook for richer claim selection (e.g. LLM-based) if desired,
-        but the default is sufficient and reproducible.
+        hook for rich claim selection (e.g. LLM-based) if desired, but
+        the default is sufficient and reproducible.
     case_sensitive : bool, default False
         Passed to ``TextAssociativeMemory``.  False folds case so that
         "Quantum" and "quantum" are the same symbol — appropriate for
@@ -309,6 +310,10 @@ def run_telemetry(
     alphabet : sequence, optional
         Explicit alphabet.  If None, the alphabet is built from the
         corpus text (recommended for large corpora with diverse vocab).
+    dtype : numpy dtype, default float64
+        Storage dtype for the encoded corpus.  ``np.uint8`` uses 1
+        byte/char/channel (94 bytes/char with the default alphabet vs
+        752 for float64) — recommended for corpora > 500 KB.
 
     Returns
     -------
@@ -325,19 +330,53 @@ def run_telemetry(
     score per probe.  The mean of those best scores is the run's coherence
     value.  A score of 1.0 means at least one claim appears verbatim in the
     prior corpus; 0.0 means no overlap at all.
+
+    **Performance:** the full corpus is encoded once (not per-run), and
+    each run's prior corpus is a slice of that encoding.  This makes the
+    overall computation O(N) in the number of runs rather than O(N²).
     """
     if claim_extractor is None:
         claim_extractor = default_claim_extractor(max_claims)
 
     results: List[RunTelemetry] = []
-    corpus_chars = 0
+
+    # Pre-extract claims for all runs (deterministic, no search involved)
+    all_claims: List[List[str]] = [claim_extractor(r) for r in runs]
+
+    if not runs:
+        return results
+
+    # Build the memory once, with the alphabet covering the full corpus
+    # + all claims (so every probe symbol is encodable).
+    full_corpus = "\n\n".join(runs)
+    full_claims_text = " ".join(c for claims in all_claims for c in claims)
+
+    mem = _build_mem(case_sensitive=case_sensitive)
+    mem.dtype = dtype if dtype is not None else np.float64
+    if alphabet is not None:
+        mem.alphabet = list(alphabet)
+        mem._L = len(mem.alphabet)
+        mem.dtype = dtype
+    else:
+        mem.build_alphabet(full_corpus + "\n" + full_claims_text)
+        mem.dtype = dtype
+
+    # Encode the full corpus once
+    full_enc = mem.encode_target(full_corpus)
+
+    # Pre-compute the character offset where each run starts in the
+    # full corpus ("\n\n".join(runs) → separator is 2 chars between runs).
+    offsets: List[int] = [0]
+    pos = 0
+    for r in runs[:-1]:
+        pos += len(r) + 2  # +2 for "\n\n"
+        offsets.append(pos)
 
     for i, run_text in enumerate(runs):
-        claims = claim_extractor(run_text)
+        claims = all_claims[i]
 
         if i == 0:
-            # No prior corpus — first run is the origin, coherence against
-            # nothing is undefined.  Report 0.0 (no prior to be coherent with).
+            # No prior corpus — first run is the origin.
             results.append(RunTelemetry(
                 run_index=0,
                 run_label=f"run_{i}",
@@ -346,12 +385,14 @@ def run_telemetry(
                 claims=claims,
                 corpus_chars=0,
             ))
-            # Start building the corpus with run 0's text
-            corpus_chars = len(run_text)
             continue
 
-        # Corpus = concatenation of all prior runs (0..i-1)
-        prior_corpus = "\n\n".join(runs[:i])
+        # Prior corpus = full_corpus[:end_of_run_i-1]
+        prior_end = offsets[i]
+        prior_corpus = full_corpus[:prior_end]
+        # Strip the trailing "\n\n" separator that "join" added
+        if prior_corpus.endswith("\n\n"):
+            prior_corpus = prior_corpus[:-2]
 
         if not prior_corpus or not claims:
             results.append(RunTelemetry(
@@ -364,23 +405,12 @@ def run_telemetry(
             ))
             continue
 
-        # Build the search engine over the prior corpus.
-        # The alphabet must include symbols from BOTH the prior corpus and
-        # the current run's claims — a claim may contain a word not yet
-        # seen in prior runs.  We build from the concatenation so the
-        # orthogonal one-hot encoding covers every probe symbol.
-        mem = _build_mem(case_sensitive=case_sensitive)
-        if alphabet is not None:
-            mem.alphabet = list(alphabet)
-            mem._L = len(mem.alphabet)
-        else:
-            mem.build_alphabet(prior_corpus + "\n" + " ".join(claims))
-
-        target_enc = mem.encode_target(prior_corpus)
+        # Slice the pre-encoded corpus to get just the prior portion
+        # Each character maps to one row in the one-hot matrix
+        target_enc = full_enc[:prior_end]
 
         # Probe claims against prior corpus with threshold=0.0 (unthresholded)
-        # so we get the best score per claim, including partials.
-        # Use search_many to share the corpus FFTs across all claims.
+        # Using search_many to share the target's channel FFTs across all claims.
         results_per_probe = mem.search_many(claims, target_enc, threshold=0.0)
 
         best_scores = []
@@ -400,8 +430,6 @@ def run_telemetry(
             claims=claims,
             corpus_chars=len(prior_corpus),
         ))
-
-        corpus_chars = len(prior_corpus) + len(run_text)
 
     return results
 

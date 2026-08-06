@@ -229,6 +229,19 @@ class TestRunTelemetry:
         # Run 2: prior = runs 0 and 1 joined by "\n\n"
         assert rt[2].corpus_chars == len(runs[0]) + 2 + len(runs[1])
 
+    def test_dtype_uint8_produces_same_results(self):
+        """The dtype parameter should not change the coherence scores."""
+        runs = [
+            "Quantum holographic memory methods explore coherence in depth.",
+            "Quantum holographic memory methods continue the exploration.",
+            "Gardening tomatoes requires soil pH for growth.",
+        ]
+        rt_f64 = run_telemetry(runs, max_claims=3, dtype=np.float64)
+        rt_u8 = run_telemetry(runs, max_claims=3, dtype=np.uint8)
+        for a, b in zip(rt_f64, rt_u8):
+            assert a.mean_best_score == pytest.approx(b.mean_best_score, abs=1e-6)
+            assert a.best_scores == pytest.approx(b.best_scores, abs=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # aggregate_telemetry
