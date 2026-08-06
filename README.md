@@ -158,6 +158,49 @@ normalized string's coordinates.
 ### `Match(position, score, significance)`
 Dataclass for match results.
 
+## v0.4.0 — Convergence Telemetry
+
+**New module:** `selly_fft.telemetry` — instruments the research process
+itself. Extracts key claims from each run document, probes them against
+the concatenated text of all prior runs using `search_many` (shared FFT
+acceleration), and produces a **convergence curve** measuring whether the
+research spiral is converging (C) or fragmenting (D).
+
+This is a direct application of `dE/dt = β(C − D)E`: rising coherence =
+constructive interference = C; scatter = destructive interference = D.
+
+```python
+from selly_fft import telemetry
+
+# Load runs from a directory (handles both Run-01-First.md and
+# 2026-07-30-Run-01-First.md naming patterns)
+texts, labels = telemetry.load_runs_from_directory("/path/to/research-runs")
+
+# Compute per-run coherence against all prior runs
+run_results = telemetry.run_telemetry(texts, max_claims=15)
+
+# Aggregate into curve + outlier detection + trend classification
+agg = telemetry.aggregate_telemetry(run_results, run_labels=labels)
+print(agg.convergence_curve)  # [0.0, 0.153, 0.367, 0.744, ...]
+print(agg.trend)              # "rising" / "falling" / "flat" / "insufficient"
+print(agg.outliers)           # [index, ...] — runs that drop coherence sharply
+print(agg.coherence_mean)     # mean of the curve (excl. run 0)
+```
+
+**Scoring convention (explicit):** all scores use real-part normalized
+cross-correlation with `threshold=0.0`. 1.0 = exact phrase overlap,
+0.0 = no alignment, partial = fraction of matching positions. The
+`threshold=0.0` flag ensures partial matches still register — this is
+a coherence *curve*, not a significance gate.
+
+**Claim extraction** is deterministic and LLM-independent: Markdown is
+stripped, sentences are split into clauses on commas/conjunctions, and
+clauses longer than `MAX_CLAIM_WORDS` (6) are broken into overlapping
+6-word sliding windows for phrase-granularity scoring.
+
+See `Run-133-Convergence-Telemetry-Module.md` and the docstring on each
+public function for details.
+
 ## v0.3.0 Features
 
 **`find_spans(probe, target)`** — like `find_matches`, but returns `Span`

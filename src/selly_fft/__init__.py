@@ -34,8 +34,9 @@ from selly_fft.core import (
 from selly_fft.dna import DNAAssociativeMemory, dna_match
 from selly_fft.text import TextAssociativeMemory, text_match, TEXT_ALPHABET, Span
 from selly_fft.func import holographic_match
+from selly_fft import telemetry
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "SellyAssociativeMemory",
@@ -54,4 +55,5 @@ __all__ = [
     "linear_correlation",
     "DEFAULT_ALPHABET",
     "TEXT_ALPHABET",
+    "telemetry",
 ]

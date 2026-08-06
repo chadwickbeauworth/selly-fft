@@ -65,8 +65,35 @@ drowns in chance partials. **Verified cost:** ~0.4 s per 1 MB per probe
 ## 2. Iterative research runs — convergence telemetry
 
 **Problem:** "is run N converging or wandering?" was a judgment call.
-**Recipe:** probe the run's key claims against all prior run outputs; track
-mean best-score over time.
+**Recipe:** use the `selly_fft.telemetry` module to probe each run's
+key claims against all prior runs and track the mean best-score over time.
+
+```python
+from selly_fft import telemetry
+
+texts, labels = telemetry.load_runs_from_directory("/path/to/research-runs")
+run_results = telemetry.run_telemetry(texts, max_claims=15)
+agg = telemetry.aggregate_telemetry(run_results, run_labels=labels)
+
+# Rising curve = spiral converging; flat/falling = fragmenting
+print(agg.convergence_curve)   # per-run mean best-score
+print(agg.trend)              # "rising" / "falling" / "flat"
+print(agg.outliers)           # runs that broke coherence
+```
+
+**Scoring convention:** real-part normalized cross-correlation,
+`threshold=0.0` (best unthresholded score per claim). 1.0 = exact phrase
+overlap, 0.0 = no symbol-level alignment, partial = fraction of matching
+positions. `threshold=0.0` is used deliberately — you want the *curve*,
+not a significance gate. See `Run-133-Convergence-Telemetry-Module.md`.
+
+Use the best-score-per-claim (`search_many` then max) rather than a
+fixed threshold — you want the curve, not a hit count.
+
+**Loading runs:** `load_runs_from_directory` handles both naming schemes:
+`Run-01-First.md` and `2026-07-30-Run-01-First.md`. Files are sorted by
+the embedded run number. Pass `include_date_prefixed=False` to load only
+the plain `Run-NNN` files.
 
 ```python
 claims = extract_key_claims(run_n_output)            # 5-10 short phrases
