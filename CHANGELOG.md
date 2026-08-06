@@ -11,12 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`selly_fft.telemetry` module** — convergence telemetry for research
   runs. Instruments the research process itself: extract key claims from
   each run, probe them against the concatenated text of all prior runs
-  using FFT-accelerated `search_many`, and produce a convergence curve
-  measuring whether the research spiral is converging (C) or fragmenting
-  (D). Implements the `dE/dt = β(C−D)E` principle directly as a metric.
+  using `search_many` (shared FFT acceleration), and produce a convergence
+  curve measuring whether the research spiral is converging (C) or
+  fragmenting (D). Implements the `dE/dt = β(C−D)E` principle directly
+  as a metric.
 
   Public API:
-  - `run_telemetry(runs, *, max_claims=15, claim_extractor, case_sensitive, alphabet) -> List[RunTelemetry]`
+  - `run_telemetry(runs, *, max_claims=15, claim_extractor, case_sensitive, alphabet, dtype) -> List[RunTelemetry]`
   - `convergence_curve(runs, **kwargs) -> List[float]`
   - `aggregate_telemetry(run_telemetry_list, run_labels) -> TelemetryResult`
   - `load_runs_from_directory(directory, pattern, max_runs, include_date_prefixed) -> (texts, labels)`
@@ -26,25 +27,28 @@ adheres to [Semantic Versioning](https://semver.org/).
     split into overlapping sliding-window key phrases for phrase-granularity
     match-fraction scoring)
 
+  **Performance:** full corpus encoded once (not per-run), prior corpus
+  sliced from pre-encoded array. `dtype=np.uint8` for 87% memory reduction
+  at scale.
+
   **Scoring convention (explicit):** all telemetry scores use real-part
   normalized cross-correlation with `threshold=0.0` (best unthresholded
   score per claim). 1.0 = exact phrase overlap, 0.0 = no alignment,
-  partial = fraction of matching positions.
-
-  Includes 38 tests covering claim extraction, coherence scoring,
-  outlier detection, trend classification, and directory loading.
+  partial = fraction of matching positions. `threshold=0.0` is used
+  deliberately so partial matches register in the coherence curve.
 
 ### Changed
 
-- `_BOILERPLATE_PAT` regex in the new telemetry module was initially
-  broken (empty alternative matched everything) — fixed before tests
-  would pass. This bug only existed in the pre-test development cycle
-  and was never released.
+- `run_telemetry` rewritten to encode the full corpus once and slice
+  per-run (O(N) encoding vs O(N²)). Adds `dtype` parameter.
+- `load_runs_from_directory` default pattern now matches both `Run-NNN`
+  and date-prefixed `2026-NN-NN-Run-NNN` naming schemes.
 
 ### Tests
 
-- 36 new tests in `tests/test_telemetry.py` (total: 162, up from 124).
-- Full suite: `162 passed in 1.39s`.
+- 39 new tests in `tests/test_telemetry.py` (total: 163, up from 124).
+- Full suite: `163 passed in 1.41s`.
+- `test_dtype_uint8_produces_same_results` verifies optimization correctness.
 
 ## [0.3.0] — 2026-08-04
 
